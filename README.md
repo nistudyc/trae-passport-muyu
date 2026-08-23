@@ -200,3 +200,41 @@ docs/                    Agent hardware development guide and extension document
 sdkconfig.defaults       ESP32-C3, USB console, Flash, and LVGL defaults
 AGENTS.md                Coding, validation, and contribution rules for agents
 ```
+
+## Woodfish Merit Counter (this fork)
+
+On top of the baseline, this repository ships **Woodfish Merit Counter** (`main/demo_woodfish.c`), a knock-the-woodfish merit app. The device boots straight into it:
+
+- `OK` (on press) — knock: merit +1, sound, woodfish animation, floating "+1"
+- `UP` short — mute toggle; `UP` long (1.5 s) — power off (deep sleep; press `UP` again to wake)
+- `DOWN` short — cycle tone CLASSIC / BELL / BLOCK / DROP with a preview; `DOWN` long — auto-knock every 0.7 s
+- Long `OK` — return to the demo menu (Display/Button/Audio/Battery pages)
+- Battery gauge in the top-right corner, refreshed every 30 s
+- 30 s without input dims the backlight; auto-knocking keeps counting and sounding in the dark
+- Merit, mute, auto-knock, tone, and the backlight level set on the Display page are persisted in NVS and restored on boot
+
+Pure-logic host test (no hardware needed):
+
+```bash
+cc -std=c11 -Wall -Wextra -Werror -Imain \
+  tests/test_woodfish_model.c main/woodfish_model.c \
+  -o /tmp/test_woodfish_model
+/tmp/test_woodfish_model
+```
+
+### Web flashing
+
+Any ESP32-C3 web flasher (for example the FoloToy AI Passport web flasher) can install the merged single-file image at offset `0x0`:
+
+```bash
+idf.py build
+python -m esptool --chip esp32c3 merge_bin -o woodfish-flash-all.bin \
+  --flash_mode dio --flash_size 8MB --flash_freq 80m \
+  0x0 build/bootloader/bootloader.bin \
+  0x8000 build/partition_table/partition-table.bin \
+  0x10000 build/FoloToy-AI-Passport.bin
+```
+
+## Author
+
+**Nick** ([nistudyc](https://github.com/nistudyc)) — built on the [folotoy/ai-passport](https://github.com/folotoy/ai-passport) development baseline.

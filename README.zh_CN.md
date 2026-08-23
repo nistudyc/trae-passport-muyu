@@ -199,3 +199,41 @@ docs/                    agent 硬件开发指南与扩展文档
 sdkconfig.defaults       ESP32-C3、USB console、Flash、LVGL 默认配置
 AGENTS.md                agent 在本仓库的编码、验证和提交规则
 ```
+
+## 敲木鱼积功德（本仓库应用）
+
+在基线之上，本仓库内置了**敲木鱼积功德**应用（`main/demo_woodfish.c`），开机直接进入：
+
+- `OK`（按下瞬间）—— 敲一下木鱼：功德 +1、音效、动画、飘出 "+1"
+- `UP` 短按 —— 静音 / 取消静音；`UP` 长按 1.5 秒 —— 关机（深度睡眠，再按 `UP` 开机）
+- `DOWN` 短按 —— 循环切换音色 CLASSIC / BELL / BLOCK / DROP，切换时预览一声；`DOWN` 长按 —— 每 0.7 秒自动敲击
+- 长按 `OK` —— 返回演示菜单（Display / Button / Audio / Battery 页面）
+- 右上角电量显示，每 30 秒刷新
+- 30 秒无操作自动息屏；息屏期间自动敲击继续计数、发声（"听声攒功德"）
+- 功德、静音、自动敲击、音色、Display 页设置的亮度档均持久化到 NVS，重启后恢复
+
+纯逻辑主机测试（无需硬件）：
+
+```bash
+cc -std=c11 -Wall -Wextra -Werror -Imain \
+  tests/test_woodfish_model.c main/woodfish_model.c \
+  -o /tmp/test_woodfish_model
+/tmp/test_woodfish_model
+```
+
+### 网页刷机
+
+任意 ESP32-C3 网页刷机器（例如 FoloToy AI Passport 官方刷机页）都可将合并后的单文件镜像写入偏移 `0x0`：
+
+```bash
+idf.py build
+python -m esptool --chip esp32c3 merge_bin -o woodfish-flash-all.bin \
+  --flash_mode dio --flash_size 8MB --flash_freq 80m \
+  0x0 build/bootloader/bootloader.bin \
+  0x8000 build/partition_table/partition-table.bin \
+  0x10000 build/FoloToy-AI-Passport.bin
+```
+
+## 作者
+
+**Nick**（[nistudyc](https://github.com/nistudyc)）—— 基于 [folotoy/ai-passport](https://github.com/folotoy/ai-passport) 开发基线构建。
