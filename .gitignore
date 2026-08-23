@@ -6,3 +6,5 @@ dependencies.lock
 .vscode/
 .DS_Store
 flash-package/
+idf553.sh
+find_sn_key.py
