@@ -12,6 +12,7 @@
 #include "bsp_pins.h"      // 错误日志里要打印 BSP_LCD_* 引脚号
 #include "demo.h"
 #include "ui_pixel.h"
+#include "woodfish_store.h"
 #include "lvgl.h"
 #include "esp_log.h"
 
@@ -22,8 +23,10 @@ static const demo_entry_t DEMOS[] = {
     { "Button",  demo_button_enter,  demo_button_exit,  demo_button_key  },
     { "Audio",   demo_audio_enter,   demo_audio_exit,   demo_audio_key   },
     { "Battery", demo_battery_enter, demo_battery_exit, demo_battery_key },
+    { "Muyu",    demo_woodfish_enter, demo_woodfish_exit, demo_woodfish_key },
 };
 #define DEMO_COUNT (sizeof(DEMOS) / sizeof(DEMOS[0]))
+#define MUYU_DEMO_INDEX ((int)DEMO_COUNT - 1)
 
 // 各外设初始化结果:失败的项在菜单里标 [FAIL] 且不允许进入。
 static bool s_ok[DEMO_COUNT];
@@ -51,15 +54,16 @@ static void menu_build(void) {
 
     for (size_t i = 0; i < DEMO_COUNT; i++) {
         int x = 11 + (int)(i % 2) * 112;
-        int y = 58 + (int)(i / 2) * 86;
-        s_cards[i] = ui_pixel_panel_create(s_menu_scr, x, y, 102, 72, UI_PAPER);
+        int y = 54 + (int)(i / 2) * 66;
+        if (i == DEMO_COUNT - 1 && (DEMO_COUNT % 2) == 1) x = 67;   // 奇数项居中收尾
+        s_cards[i] = ui_pixel_panel_create(s_menu_scr, x, y, 102, 54, UI_PAPER);
         s_rows[i] = lv_label_create(s_cards[i]);
         lv_obj_set_style_text_font(s_rows[i], &lv_font_montserrat_20, 0);
         lv_obj_set_style_text_align(s_rows[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(s_rows[i]);
     }
 
-    s_mascot = ui_pixel_mascot_create(s_menu_scr, 101, 238);
+    s_mascot = ui_pixel_mascot_create(s_menu_scr, 191, 252);
 
     menu_refresh();
     lv_screen_load(s_menu_scr);
@@ -120,9 +124,17 @@ void app_main(void) {
     s_ok[1] = (bsp_button_init(on_key, NULL) == ESP_OK);
     s_ok[2] = (bsp_audio_init() == ESP_OK);
     s_ok[3] = (bsp_battery_init() == ESP_OK);
+    s_ok[4] = s_ok[1];                                // 木鱼只硬依赖屏幕和按键
+    demo_woodfish_prepare(s_ok[2], s_ok[3]);          // 音效、电量均可软降级
+    // Display 页保存的亮度档全局生效:存储就绪后从默认全亮切到用户档
+    bsp_display_backlight(woodfish_store_brightness());
 
-    if (bsp_lvgl_lock(1000)) { enter_menu(); bsp_lvgl_unlock(); }
+    if (bsp_lvgl_lock(1000)) {
+        s_active = MUYU_DEMO_INDEX;                   // 开机直接进入敲木鱼
+        DEMOS[s_active].enter();
+        bsp_lvgl_unlock();
+    }
 
-    ESP_LOGI(TAG, "就绪:Display=%d Button=%d Audio=%d Battery=%d",
+    ESP_LOGI(TAG, "木鱼已直接启动:Display=%d Button=%d Audio=%d Battery=%d",
              s_ok[0], s_ok[1], s_ok[2], s_ok[3]);
 }

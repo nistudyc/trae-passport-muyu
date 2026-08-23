@@ -1,8 +1,9 @@
-// main/demo_display.c —— 色块 + 背光调光。
+// main/demo_display.c —— 色块 + 背光调光(亮度档位持久化,全局生效)。
 // 用 LVGL 铺纯色(而非底层 draw_bitmap),这样和菜单共用同一套屏幕管理。
 #include "demo.h"
 #include "bsp_display.h"
 #include "ui_pixel.h"
+#include "woodfish_store.h"
 #include "lvgl.h"
 
 static lv_obj_t *s_scr;
@@ -24,13 +25,24 @@ static void refresh(void) {
     // 文字用与背景相反的明度,保证任何色块上都看得见
     bool dark = (s_color_idx == 2 || s_color_idx == 4);   // BLUE / BLACK
     lv_obj_set_style_text_color(s_info, dark ? lv_color_white() : lv_color_black(), 0);
-    lv_label_set_text_fmt(s_info, "%s\n\nBACKLIGHT %d%%\n\nOK: NEXT COLOR\nUP/DOWN: LIGHT",
+    lv_label_set_text_fmt(s_info, "%s\n\nBACKLIGHT %d%%\n\nOK: NEXT COLOR\nUP/DOWN: LIGHT\n(AUTO-SAVED)",
                           COLOR_NAME[s_color_idx], BL_LEVELS[s_bl_idx]);
+}
+
+// 保存值可能不在档位表里(将来改表),取最接近的档位兜底。
+static int bl_nearest_idx(uint8_t percent) {
+    int best = 0, best_diff = 999;
+    for (size_t i = 0; i < BL_COUNT; i++) {
+        int diff = (int)BL_LEVELS[i] - (int)percent;
+        if (diff < 0) diff = -diff;
+        if (diff < best_diff) { best_diff = diff; best = (int)i; }
+    }
+    return best;
 }
 
 void demo_display_enter(void) {
     s_color_idx = 0;
-    s_bl_idx = 0;
+    s_bl_idx = bl_nearest_idx(woodfish_store_brightness());
     bsp_display_backlight(BL_LEVELS[s_bl_idx]);
 
     s_scr = ui_pixel_screen_create("DISPLAY");
@@ -45,7 +57,7 @@ void demo_display_enter(void) {
 }
 
 void demo_display_exit(void) {
-    bsp_display_backlight(100);          // 退出时恢复全亮,免得菜单看不见
+    // 亮度档位已存 NVS 且当前生效,保持用户选择(开机/其他页也用这档)
     if (s_scr) { lv_obj_delete(s_scr); s_scr = NULL; s_swatch = s_info = s_mascot = NULL; }
 }
 
@@ -58,6 +70,7 @@ void demo_display_key(bsp_btn_t btn, bsp_btn_ev_t ev) {
         s_bl_idx = (btn == BSP_BTN_UP) ? (s_bl_idx + BL_COUNT - 1) % BL_COUNT
                                        : (s_bl_idx + 1) % BL_COUNT;
         bsp_display_backlight(BL_LEVELS[s_bl_idx]);
+        woodfish_store_set_brightness(BL_LEVELS[s_bl_idx]);   // 调完即存
     }
     refresh();
 }
