@@ -4,6 +4,8 @@
 #include "bsp_pins.h"
 #include "iot_button.h"
 #include "button_adc.h"
+#include "button_gpio.h"
+#include "driver/gpio.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -14,6 +16,9 @@ static const char *TAG = "bsp_btn";
 static const uint16_t BTN_MV[BSP_BTN_COUNT][2] = BSP_BTN_MV_TABLE;
 
 static button_handle_t s_btn[BSP_BTN_COUNT];
+#if BSP_PWR_BTN_GPIO >= 0
+static button_handle_t s_power_btn;
+#endif
 static bsp_btn_cb_t    s_cb;
 static void           *s_user;
 
@@ -74,6 +79,33 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
         iot_button_register_cb(s_btn[i], BUTTON_LONG_PRESS_START,NULL, cb_long,   idx);
     }
 
+    // 电源键:独立 GPIO、低电平有效。active_level=0 时驱动自动启用内部上拉,
+    // 板上无需外部电阻。长按阈值用 bsp_pins.h 的 BSP_PWR_LONG_MS(关机用,
+    // 比 ADC 键的默认 2s 短,手感更像"按住关机")。未配置(-1)则跳过,
+    // 深睡唤醒仍退回 GPIO0(UP 键)。
+#if BSP_PWR_BTN_GPIO >= 0
+    const button_gpio_config_t gc = {
+        .gpio_num     = BSP_PWR_BTN_GPIO,
+        .active_level = 0,
+    };
+    const button_config_t pbc = {
+        .long_press_time = BSP_PWR_LONG_MS,
+    };
+    esp_err_t pe = iot_button_new_gpio_device(&pbc, &gc, &s_power_btn);
+    if (pe == ESP_OK && s_power_btn) {
+        void *idx = (void *)(intptr_t)BSP_BTN_POWER;
+        iot_button_register_cb(s_power_btn, BUTTON_PRESS_DOWN,      NULL, cb_press,  idx);
+        iot_button_register_cb(s_power_btn, BUTTON_SINGLE_CLICK,    NULL, cb_click,  idx);
+        iot_button_register_cb(s_power_btn, BUTTON_DOUBLE_CLICK,    NULL, cb_double, idx);
+        iot_button_register_cb(s_power_btn, BUTTON_LONG_PRESS_START,NULL, cb_long,   idx);
+        ESP_LOGI(TAG, "电源键就绪:GPIO%d 低电平有效", BSP_PWR_BTN_GPIO);
+    } else {
+        ESP_LOGW(TAG, "电源键创建失败 GPIO%d (%s),长按关机/短按息屏不可用",
+                 BSP_PWR_BTN_GPIO, esp_err_to_name(pe));
+        s_power_btn = NULL;
+    }
+#endif
+
     // 通道已由组件配置好,这里只补一份校准句柄给 bsp_button_read_mv() 用。
     // 失败不致命:按键照常工作,只是读不出电压(标定分压电阻时才需要)。
     const adc_cali_curve_fitting_config_t cal = {
@@ -87,7 +119,13 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
         s_cali = NULL;
     }
 
-    ESP_LOGI(TAG, "按键就绪:ADC1_CH%d 三键分压", BSP_BTN_ADC_CHANNEL);
+#if BSP_PWR_BTN_GPIO >= 0
+    ESP_LOGI(TAG, "按键就绪:ADC1_CH%d 三键分压 + 电源键 GPIO%d",
+             BSP_BTN_ADC_CHANNEL, (int)BSP_PWR_BTN_GPIO);
+#else
+    ESP_LOGI(TAG, "按键就绪:ADC1_CH%d 三键分压(电源键未配置,BSP_PWR_BTN_GPIO=-1)",
+             BSP_BTN_ADC_CHANNEL);
+#endif
     return ESP_OK;
 }
 
@@ -100,4 +138,14 @@ int bsp_button_read_mv(void) {
     if (adc_oneshot_read(s_adc, BSP_BTN_ADC_CHANNEL, &raw) != ESP_OK) return -1;
     if (adc_cali_raw_to_voltage(s_cali, raw, &mv) != ESP_OK) return -1;
     return mv;
+}
+
+bool bsp_button_power_held(void) {
+#if BSP_PWR_BTN_GPIO >= 0
+    // 引脚已由 iot_button_new_gpio_device() 配置为输入+上拉,直读电平即可。
+    // 未建按键(初始化失败)时浮空读数不可靠,但 guard 有 10s 兜底,不会卡死。
+    return s_power_btn && gpio_get_level(BSP_PWR_BTN_GPIO) == 0;
+#else
+    return false;
+#endif
 }

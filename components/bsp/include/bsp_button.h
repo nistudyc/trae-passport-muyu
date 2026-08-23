@@ -1,6 +1,9 @@
 // components/bsp/include/bsp_button.h
 // 三个按键共用一个 ADC 引脚,靠分压电阻区分。电压窗口见 bsp_pins.h。
+// 电源键为独立 GPIO(见 bsp_pins.h 的 BSP_PWR_BTN_GPIO,-1 表示未配置)。
 #pragma once
+
+#include <stdbool.h>
 
 #include "esp_err.h"
 
@@ -10,6 +13,7 @@ typedef enum {
     BSP_BTN_UP = 0,
     BSP_BTN_DOWN,
     BSP_BTN_OK,
+    BSP_BTN_POWER,       // 独立 GPIO 电源键(未配置时不会有事件)
 } bsp_btn_t;
 
 typedef enum {
@@ -28,3 +32,7 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user);
 // ★ 换了分压/上拉阻值后,用它测出自己的三档电压,再改 bsp_pins.h 的 BSP_BTN_MV_TABLE。
 // 读取失败返回 -1。
 int bsp_button_read_mv(void);
+
+// 电源键当前是否被按住(低电平)。未配置 BSP_PWR_BTN_GPIO 时恒为 false。
+// 深睡唤醒 guard 与"等松键再睡"都靠它,防止按住唤醒键立刻又长按关机。
+bool bsp_button_power_held(void);
