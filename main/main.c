@@ -1,11 +1,13 @@
 // main/main.c —— FoloToy-Card BSP 驱动参考示例:初始化 + 菜单 + 按键分发。
 //
 // 按键语义(全局统一):
-//   上 短按   子页面=保存退出返回菜单;主菜单=息屏/亮屏切换
-//   上 长按   关机(任何页面;木鱼页事件仍走页面,以过开机防误触 guard)
-//   下 短按   菜单中=移动选中项;演示页中=该页自定义
-//   确定 短按 菜单中=进入选中项;演示页中=该页自定义(木鱼页=敲击)
-//   确定 长按 演示页中=该页自定义(木鱼页=静音)
+//   电源键 短按 息屏/亮屏(菜单与木鱼页;其余演示页无息屏概念,不响应)
+//   电源键 长按 关机(任何页面;木鱼页事件仍走页面,以过开机防误触 guard)
+//   上 短按   菜单=上移选中项;演示页=该页自定义(木鱼页=静音)
+//   下 短按   菜单=下移选中项;演示页=该页自定义(木鱼页=音色)
+//   确定 短按 菜单=进入选中项;演示页=该页自定义(木鱼页=敲击)
+//   确定 长按 演示页=保存退出返回菜单(木鱼页息屏时只亮屏)
+//   电源键在 bsp_pins.h 的 BSP_PWR_BTN_GPIO 配置(-1 = 未检测,功能停用)。
 #include "bsp_i2c.h"
 #include "bsp_display.h"
 #include "bsp_button.h"
@@ -89,6 +91,14 @@ static void menu_wake(void) {
     bsp_display_backlight(woodfish_store_brightness());
 }
 
+// 保存退出当前演示页,返回主菜单。供 main 的按键分发与页面自定义交互
+// (木鱼页 OK 长按)共用;调用时必须已持有 LVGL 锁。
+void app_exit_to_menu(void) {
+    if (s_active < 0) return;            // 已在菜单
+    DEMOS[s_active].exit();
+    enter_menu();
+}
+
 // 按键回调运行在 button 组件的任务里,操作 LVGL 必须加锁。
 static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
     (void)user;
@@ -96,25 +106,37 @@ static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
 
     // 电源键长按:任何页面都关机。木鱼页除外——它的开机防误触 guard 在
     // demo_woodfish_key 里,事件必须先进页面才能被 guard 拦下。
-    if (btn == BSP_BTN_UP && ev == BSP_BTN_LONG && s_active != MUYU_DEMO_INDEX) {
+    if (btn == BSP_BTN_POWER && ev == BSP_BTN_LONG && s_active != MUYU_DEMO_INDEX) {
         demo_woodfish_power_off();         // 不返回(持锁进入深睡,断电前无需解锁)
     }
 
+    // 电源键短按:息屏/亮屏。只有菜单和木鱼页有息屏概念,其余演示页忽略。
+    if (btn == BSP_BTN_POWER && ev == BSP_BTN_CLICK) {
+        if (s_active == MUYU_DEMO_INDEX) {
+            demo_woodfish_screen_toggle();     // 息屏时这一下自然就是"亮屏"
+        } else if (s_active < 0) {
+            if (s_menu_dark) menu_wake();
+            else             menu_sleep();
+        }
+        bsp_lvgl_unlock();
+        return;
+    }
+
     if (s_active >= 0) {
-        if (btn == BSP_BTN_UP && ev == BSP_BTN_CLICK &&
-            !(s_active == MUYU_DEMO_INDEX && demo_woodfish_screen_off())) {
-            DEMOS[s_active].exit();        // 保存退出,返回上一级
-            enter_menu();
+        if (btn == BSP_BTN_OK && ev == BSP_BTN_LONG && s_active != MUYU_DEMO_INDEX) {
+            app_exit_to_menu();           // 保存退出,返回上一级
         } else {
-            // 木鱼页息屏时短按电源键只亮屏:screen_wake 在页面 key 里做,
-            // 且页面不再处理 UP 单击,自然不会退出
+            // 木鱼页自己判定 OK 长按(按下瞬间息屏则只当唤醒,不退出);
+            // 其余按键/事件交给当前演示页处理
             DEMOS[s_active].key(btn, ev);
         }
     } else if (ev == BSP_BTN_CLICK) {
         bool was_dark = s_menu_dark;
-        if (was_dark) menu_wake();         // 息屏时任意按键:亮屏
-        if (btn == BSP_BTN_UP) {
-            if (!was_dark) menu_sleep();   // 亮屏时短按电源键:息屏(唤醒那一下不回关)
+        if (was_dark) menu_wake();         // 息屏时任意按键:亮屏(那一把不导航)
+        else if (btn == BSP_BTN_UP) {
+            s_sel = (s_sel + DEMO_COUNT - 1) % DEMO_COUNT;
+            menu_refresh();
+            ui_pixel_mascot_jump(s_mascot);
         } else if (btn == BSP_BTN_DOWN) {
             s_sel = (s_sel + 1) % DEMO_COUNT;
             menu_refresh();

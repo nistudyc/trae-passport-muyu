@@ -10,7 +10,7 @@ typedef struct {
     const char *name;
     void (*enter)(void);                          // 建自己的屏并载入
     void (*exit)(void);                           // 删屏、停定时器、释放资源
-    void (*key)(bsp_btn_t btn, bsp_btn_ev_t ev);  // 收按键(电源键 UP 由 main 统一分发)
+    void (*key)(bsp_btn_t btn, bsp_btn_ev_t ev);  // 收按键(电源键与 OK 长按由 main 统一分发)
 } demo_entry_t;
 
 // 各演示页(定义在各自的 .c 里)
@@ -33,5 +33,9 @@ void demo_woodfish_key(bsp_btn_t btn, bsp_btn_ev_t ev);
 // 保存当前功德并进入深度睡眠(任何页面长按电源键都走这里;不返回)。
 void demo_woodfish_power_off(void);
 
-// 木鱼页当前是否处于息屏态(main.c 据此让息屏时的短按电源键只亮屏不返回)。
-bool demo_woodfish_screen_off(void);
+// 翻转木鱼页息屏/亮屏(短按电源键;开机防误触 guard 期间为空操作)。
+void demo_woodfish_screen_toggle(void);
+
+// 保存退出当前演示页,返回主菜单(main.c 实现)。页面在自定义按键交互里
+// 请求退出时调用;调用时必须已持有 LVGL 锁(按键回调上下文天然满足)。
+void app_exit_to_menu(void);

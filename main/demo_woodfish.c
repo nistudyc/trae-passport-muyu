@@ -1,12 +1,13 @@
 // main/demo_woodfish.c —— 敲木鱼积功德。
 //
-// 交互(电源键 UP 短按"保存退出返回菜单"与长按关机由 main.c 统一分发):
-//   OK   按下瞬间  敲一下木鱼:功德 +1、播放敲击声、木鱼下沉回弹、飘出 +1
-//   OK   长按      静音 / 取消静音
-//   UP   单击      保存并退出,返回主菜单(main.c 拦截;息屏时只亮屏不退出)
-//   UP   长按      关机(深度睡眠;按 UP 唤醒开机,或 12 小时定时兜底唤醒)
-//   DOWN 单击      切换音色 CLASSIC/BELL/BLOCK/DROP,切换时预览一声
-//   DOWN 长按      开 / 关自动敲击(每 700ms 敲一下)
+// 交互(电源键的息屏/关机由 main.c 统一分发):
+//   OK    按下瞬间 敲一下木鱼:功德 +1、播放敲击声、木鱼下沉回弹、飘出 +1
+//   OK    长按     保存并退出,返回主菜单(按下瞬间是息屏态则只当唤醒,不退出)
+//   UP    单击     静音 / 取消静音
+//   DOWN  单击     切换音色 CLASSIC/BELL/BLOCK/DROP,切换时预览一声
+//   DOWN  长按     开 / 关自动敲击(每 700ms 敲一下)
+//   电源键 短按    息屏 / 亮屏(main.c 分发,调 demo_woodfish_screen_toggle)
+//   电源键 长按    关机(深度睡眠;按 UP 键唤醒开机,或 12 小时定时兜底唤醒)
 //
 // 电量:CW2017 读 SOC,右上角图标 + 百分比,每 30 秒刷新;电量计缺失时隐藏。
 //
@@ -105,6 +106,7 @@ static bool s_wake_guard;                // 开机时仍按着键:忽略其事�
 static int s_guard_ticks;                // guard 总时长(tick),10 秒兜底
 static int s_guard_loose;                // 连续松开 tick 数,吃掉松键后的 CLICK
 static bool s_screen_off;                // 息屏态(仅背光灭,系统照常运行)
+static bool s_press_dark;                // 本次按下瞬间屏幕是否息屏(长按语义判定用)
 
 // ---- 四种音色合成 ----
 
@@ -377,16 +379,20 @@ static void set_auto(bool on) {
 }
 
 // ---- 关机:同步落盘 → 等松键 → 熄屏深睡 ----
-// 唤醒:按 UP(GPIO0 直连 GND,按下即低电平,GPIO 唤醒可靠触发)或 12 小时
-// 定时兜底;深睡唤醒等效复位重启,app_main 会再次直进木鱼页。
+// 唤醒:按 UP(GPIO0 直连 GND,按下即低电平,深睡唤醒可靠触发)或 12 小时
+// 定时兜底;电源键引脚必然在 GPIO0~5 唤醒域之外(见函数内注释),只管关机。
+// 深睡唤醒等效复位重启,app_main 会再次直进木鱼页。
 // 任何页面长按电源键都关机(main.c 分发);必须持 LVGL 锁调用(内部改 UI)。
 void demo_woodfish_power_off(void) {
     if (s_wake_guard) return;            // 开机瞬间按住的键不算长按
+    bsp_display_backlight(woodfish_store_brightness());   // 息屏中被关机:亮屏给反馈
     if (s_hint_lbl) lv_label_set_text(s_hint_lbl, "POWERING OFF...");
     woodfish_store_save_now(&s_model);
 
-    // 等 UP 松开再睡:否则按住的低电平会立刻触发唤醒,变成“没关掉”。
-    for (int i = 0; i < 150 && bsp_button_read_mv() < WF_BTN_HELD_MV; i++) {
+    // 等电源键(和任何按住的 ADC 键)松开再睡:否则按住的低电平会立刻
+    // 触发唤醒,变成"没关掉"。
+    for (int i = 0; i < 150 &&
+         (bsp_button_power_held() || bsp_button_read_mv() < WF_BTN_HELD_MV); i++) {
         vTaskDelay(pdMS_TO_TICKS(20));   // 最多 3 秒
     }
 
@@ -396,7 +402,10 @@ void demo_woodfish_power_off(void) {
     ESP_LOGI(TAG, "进入深度睡眠: merit=%lu muted=%d auto=%d tone=%d",
              (unsigned long)s_model.merit, s_model.muted,
              s_model.auto_mode, s_style);
-    // C3 无 ext0,用 GPIO 唤醒:GPIO0(UP 键)低电平唤醒
+    // C3 无 ext0,用 GPIO 唤醒。深睡唤醒只支持 GPIO0~5(RTC 电源域),而本板
+    // 这 6 个脚全被 ADC 按键(GPIO0)/LCD(1)/I2S(2~5)占用,电源键无论接在
+    // 哪都进不了唤醒掩码——而且传入无效脚会让整个调用报错、连 GPIO0 都配
+    // 不上。故唤醒源固定为 GPIO0(UP 键),电源键只负责关机。
     esp_deep_sleep_enable_gpio_wakeup(1ULL << 0, ESP_GPIO_WAKEUP_GPIO_LOW);
     esp_sleep_enable_timer_wakeup(12ULL * 3600ULL * 1000000ULL);
     esp_deep_sleep_start();              // 不返回
@@ -407,7 +416,7 @@ void demo_woodfish_power_off(void) {
 static void guard_tick(lv_timer_t *timer) {
     int mv = bsp_button_read_mv();
     s_guard_ticks++;
-    bool loose = (mv < 0 || mv >= WF_BTN_HELD_MV);
+    bool loose = (mv < 0 || mv >= WF_BTN_HELD_MV) && !bsp_button_power_held();
     if (loose) s_guard_loose++;
     else s_guard_loose = 0;
     if (s_guard_loose >= 3 || s_guard_ticks >= 100) {   // 松开300ms 或 10s 兜底
@@ -567,11 +576,11 @@ void demo_woodfish_enter(void) {
     }
     if (s_model.auto_mode) set_auto(true);
 
-    // 从深睡唤醒(复位重启)时用户可能仍按着唤醒键:忽略直到松开
+    // 从深睡唤醒(复位重启)时用户可能仍按着唤醒键(UP 或电源键):忽略直到松开
     s_guard_ticks = 0;
     s_guard_loose = 0;
     int mv = bsp_button_read_mv();
-    if (mv >= 0 && mv < WF_BTN_HELD_MV) {
+    if ((mv >= 0 && mv < WF_BTN_HELD_MV) || bsp_button_power_held()) {
         s_wake_guard = true;
         s_guard_timer = lv_timer_create(guard_tick, 100, NULL);
     }
@@ -597,32 +606,41 @@ void demo_woodfish_exit(void) {
 
 void demo_woodfish_key(bsp_btn_t btn, bsp_btn_ev_t ev) {
     if (s_wake_guard) return;                 // 唤醒后按键未松开期间,忽略
-    screen_wake();                            // 手动操作:亮屏 + 重置息屏倒计时
+    if (ev == BSP_BTN_PRESS) s_press_dark = s_screen_off;   // 记下按下瞬间是否息屏
+    // 电源键的息屏/亮屏由 main 在 CLICK 时翻转;这里不能抢先亮屏,否则
+    // "PRESS 亮屏 + CLICK 翻转回关"会把息屏唤醒变成闪一下又黑。
+    if (btn != BSP_BTN_POWER) screen_wake();  // 手动操作:亮屏 + 重置息屏倒计时
     if (btn == BSP_BTN_OK && ev == BSP_BTN_PRESS) {
         do_knock();
         return;
     }
     if (ev == BSP_BTN_CLICK) {
-        if (btn == BSP_BTN_DOWN) {            // 切换音色 + 预览一声
+        if (btn == BSP_BTN_UP) {              // 静音 / 取消静音
+            s_model.muted = !s_model.muted;
+            refresh_status();
+            woodfish_store_request_save(&s_model);
+        } else if (btn == BSP_BTN_DOWN) {     // 切换音色 + 预览一声
             s_style = (s_style + 1) % WF_STYLE_COUNT;
             refresh_status();
             woodfish_store_set_tone((uint8_t)s_style);
             preview_tone();
         }
-        // UP 短按由 main.c 拦截为"保存退出返回菜单",息屏时只亮屏
+        // OK 单击与按下瞬间重复,只认 PRESS
     } else if (ev == BSP_BTN_LONG) {
-        if (btn == BSP_BTN_UP) {
-            demo_woodfish_power_off();        // 长按关机
+        if (btn == BSP_BTN_POWER) {
+            demo_woodfish_power_off();        // 长按电源键关机
         } else if (btn == BSP_BTN_DOWN) {
             set_auto(!s_model.auto_mode);     // 长按自动敲击
-        } else if (btn == BSP_BTN_OK) {
-            s_model.muted = !s_model.muted;   // 长按静音/取消静音
-            refresh_status();
-            woodfish_store_request_save(&s_model);
+        } else if (btn == BSP_BTN_OK && !s_press_dark) {
+            app_exit_to_menu();               // 按下时屏幕点亮才退出;息屏唤醒那把不退
         }
     }
 }
 
-bool demo_woodfish_screen_off(void) {
-    return s_screen_off;
+// 短按电源键的息屏/亮屏翻转(main.c 分发)。guard 期间不响应:刚被电源键
+// 唤醒时 CLICK 在松手瞬间到达,若直接翻转会把刚点亮的屏又关掉。
+void demo_woodfish_screen_toggle(void) {
+    if (s_wake_guard) return;
+    if (s_screen_off) screen_wake();
+    else              screen_sleep();
 }
