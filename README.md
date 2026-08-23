@@ -206,11 +206,12 @@ AGENTS.md                Coding, validation, and contribution rules for agents
 On top of the baseline, this repository ships **Woodfish Merit Counter** (`main/demo_woodfish.c`), a knock-the-woodfish merit app. The device boots straight into it:
 
 - `OK` (on press) — knock: merit +1, sound, woodfish animation, floating "+1"
-- `UP` short — mute toggle; `UP` long (1.5 s) — power off (deep sleep; press `UP` again to wake)
+- `OK` long — mute toggle
+- `UP` short — save & exit, return to the demo menu (in the menu: toggle screen off/on)
+- `UP` long (1.5 s) — power off from any page (deep sleep; press `UP` again to wake)
 - `DOWN` short — cycle tone CLASSIC / BELL / BLOCK / DROP with a preview; `DOWN` long — auto-knock every 0.7 s
-- Long `OK` — return to the demo menu (Display/Button/Audio/Battery pages)
 - Battery gauge in the top-right corner, refreshed every 30 s
-- 30 s without input dims the backlight; auto-knocking keeps counting and sounding in the dark
+- 2 minutes without input dims the backlight; any key wakes it; auto-knocking keeps counting and sounding in the dark
 - Merit, mute, auto-knock, tone, and the backlight level set on the Display page are persisted in NVS and restored on boot
 
 Pure-logic host test (no hardware needed):

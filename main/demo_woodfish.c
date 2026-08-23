@@ -1,15 +1,16 @@
 // main/demo_woodfish.c —— 敲木鱼积功德。
 //
-// 交互(全局长按确定返回菜单由 main.c 拦截):
+// 交互(电源键 UP 短按"保存退出返回菜单"与长按关机由 main.c 统一分发):
 //   OK   按下瞬间  敲一下木鱼:功德 +1、播放敲击声、木鱼下沉回弹、飘出 +1
-//   UP   单击      静音 / 取消静音
+//   OK   长按      静音 / 取消静音
+//   UP   单击      保存并退出,返回主菜单(main.c 拦截;息屏时只亮屏不退出)
 //   UP   长按      关机(深度睡眠;按 UP 唤醒开机,或 12 小时定时兜底唤醒)
 //   DOWN 单击      切换音色 CLASSIC/BELL/BLOCK/DROP,切换时预览一声
 //   DOWN 长按      开 / 关自动敲击(每 700ms 敲一下)
 //
 // 电量:CW2017 读 SOC,右上角图标 + 百分比,每 30 秒刷新;电量计缺失时隐藏。
 //
-// 自动息屏:30 秒无【手动】操作熄背光(自动敲击不算操作,否则永不息屏)。
+// 自动息屏:2 分钟无【手动】操作熄背光(自动敲击不算操作,否则永不息屏)。
 // 息屏期间手动敲击照常计数+发声并亮屏;自动敲击继续计数+发声但不亮屏,
 // 变成"听声攒功德"模式。任何按键操作都会亮屏并重置息屏倒计时。
 //
@@ -51,7 +52,7 @@ static const char *TAG = "demo_muyu";
 #define WF_MS_DROP       220
 
 #define WF_AUTO_PERIOD_MS 700
-#define WF_SCREEN_TIMEOUT_MS 30000   // 无手动操作多久后息屏
+#define WF_SCREEN_TIMEOUT_MS 120000  // 无手动操作多久后息屏(2 分钟)
 #define WF_FLOAT_MAX      5         // 同屏 +1 标签上限,防快速连点刷屏
 #define WF_FLOAT_RISE     34        // +1 上飘像素
 #define WF_FLOAT_Y0       108       // +1 出生的 y(木鱼上沿附近)
@@ -378,7 +379,8 @@ static void set_auto(bool on) {
 // ---- 关机:同步落盘 → 等松键 → 熄屏深睡 ----
 // 唤醒:按 UP(GPIO0 直连 GND,按下即低电平,GPIO 唤醒可靠触发)或 12 小时
 // 定时兜底;深睡唤醒等效复位重启,app_main 会再次直进木鱼页。
-static void power_off(void) {
+// 任何页面长按电源键都关机(main.c 分发);必须持 LVGL 锁调用(内部改 UI)。
+void demo_woodfish_power_off(void) {
     if (s_wake_guard) return;            // 开机瞬间按住的键不算长按
     if (s_hint_lbl) lv_label_set_text(s_hint_lbl, "POWERING OFF...");
     woodfish_store_save_now(&s_model);
@@ -506,7 +508,7 @@ static void build_screen(void) {
     lv_obj_set_width(s_status_lbl, 220);
 
     // 操作提示(草地前)
-    s_hint_lbl = ui_pixel_label(s_scr, "OK:KNOCK UP:MUTE DN:TONE",
+    s_hint_lbl = ui_pixel_label(s_scr, "OK:KNOCK UP:BACK DN:TONE",
                                 &lv_font_montserrat_14, UI_INK);
     lv_obj_set_style_text_align(s_hint_lbl, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_pos(s_hint_lbl, 10, 283);
@@ -601,21 +603,26 @@ void demo_woodfish_key(bsp_btn_t btn, bsp_btn_ev_t ev) {
         return;
     }
     if (ev == BSP_BTN_CLICK) {
-        if (btn == BSP_BTN_UP) {              // 静音开关(与关机共用一键)
-            s_model.muted = !s_model.muted;
-            refresh_status();
-            woodfish_store_request_save(&s_model);
-        } else if (btn == BSP_BTN_DOWN) {     // 切换音色 + 预览一声
+        if (btn == BSP_BTN_DOWN) {            // 切换音色 + 预览一声
             s_style = (s_style + 1) % WF_STYLE_COUNT;
             refresh_status();
             woodfish_store_set_tone((uint8_t)s_style);
             preview_tone();
         }
+        // UP 短按由 main.c 拦截为"保存退出返回菜单",息屏时只亮屏
     } else if (ev == BSP_BTN_LONG) {
         if (btn == BSP_BTN_UP) {
-            power_off();                      // 长按关机
+            demo_woodfish_power_off();        // 长按关机
         } else if (btn == BSP_BTN_DOWN) {
             set_auto(!s_model.auto_mode);     // 长按自动敲击
+        } else if (btn == BSP_BTN_OK) {
+            s_model.muted = !s_model.muted;   // 长按静音/取消静音
+            refresh_status();
+            woodfish_store_request_save(&s_model);
         }
     }
+}
+
+bool demo_woodfish_screen_off(void) {
+    return s_screen_off;
 }

@@ -10,7 +10,7 @@ typedef struct {
     const char *name;
     void (*enter)(void);                          // 建自己的屏并载入
     void (*exit)(void);                           // 删屏、停定时器、释放资源
-    void (*key)(bsp_btn_t btn, bsp_btn_ev_t ev);  // 收按键(长按确定已被 main 拦截)
+    void (*key)(bsp_btn_t btn, bsp_btn_ev_t ev);  // 收按键(电源键 UP 由 main 统一分发)
 } demo_entry_t;
 
 // 各演示页(定义在各自的 .c 里)
@@ -29,3 +29,9 @@ void demo_battery_key(bsp_btn_t btn, bsp_btn_ev_t ev);
 void demo_woodfish_prepare(bool audio_ok, bool battery_ok);
 void demo_woodfish_enter(void); void demo_woodfish_exit(void);
 void demo_woodfish_key(bsp_btn_t btn, bsp_btn_ev_t ev);
+
+// 保存当前功德并进入深度睡眠(任何页面长按电源键都走这里;不返回)。
+void demo_woodfish_power_off(void);
+
+// 木鱼页当前是否处于息屏态(main.c 据此让息屏时的短按电源键只亮屏不返回)。
+bool demo_woodfish_screen_off(void);

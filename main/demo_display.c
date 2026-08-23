@@ -25,7 +25,7 @@ static void refresh(void) {
     // 文字用与背景相反的明度,保证任何色块上都看得见
     bool dark = (s_color_idx == 2 || s_color_idx == 4);   // BLUE / BLACK
     lv_obj_set_style_text_color(s_info, dark ? lv_color_white() : lv_color_black(), 0);
-    lv_label_set_text_fmt(s_info, "%s\n\nBACKLIGHT %d%%\n\nOK: NEXT COLOR\nUP/DOWN: LIGHT\n(AUTO-SAVED)",
+    lv_label_set_text_fmt(s_info, "%s\n\nBACKLIGHT %d%%\n\nOK: NEXT COLOR\nDOWN: LIGHT\n(AUTO-SAVED)",
                           COLOR_NAME[s_color_idx], BL_LEVELS[s_bl_idx]);
 }
 

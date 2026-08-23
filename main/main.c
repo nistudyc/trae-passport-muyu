@@ -1,9 +1,11 @@
 // main/main.c —— FoloToy-Card BSP 驱动参考示例:初始化 + 菜单 + 按键分发。
 //
 // 按键语义(全局统一):
-//   上/下 短按   菜单中=移动选中项;演示页中=该页自定义
-//   确定  短按   菜单中=进入选中项;演示页中=该页自定义
-//   确定  长按   演示页中=返回菜单(由本文件统一拦截)
+//   上 短按   子页面=保存退出返回菜单;主菜单=息屏/亮屏切换
+//   上 长按   关机(任何页面;木鱼页事件仍走页面,以过开机防误触 guard)
+//   下 短按   菜单中=移动选中项;演示页中=该页自定义
+//   确定 短按 菜单中=进入选中项;演示页中=该页自定义(木鱼页=敲击)
+//   确定 长按 演示页中=该页自定义(木鱼页=静音)
 #include "bsp_i2c.h"
 #include "bsp_display.h"
 #include "bsp_button.h"
@@ -37,6 +39,7 @@ static lv_obj_t *s_rows[DEMO_COUNT];
 static lv_obj_t *s_mascot;
 static int  s_sel;                 // 当前选中项
 static int  s_active = -1;         // 当前所在演示页;-1 = 在菜单
+static bool s_menu_dark;           // 主菜单息屏态(手动切换,无自动)
 
 static void menu_refresh(void) {
     for (size_t i = 0; i < DEMO_COUNT; i++) {
@@ -71,7 +74,19 @@ static void menu_build(void) {
 
 static void enter_menu(void) {
     s_active = -1;
+    s_menu_dark = false;
     menu_build();
+}
+
+static void menu_sleep(void) {
+    s_menu_dark = true;
+    bsp_display_backlight(0);
+    ESP_LOGI(TAG, "主菜单息屏(手动)");
+}
+
+static void menu_wake(void) {
+    s_menu_dark = false;
+    bsp_display_backlight(woodfish_store_brightness());
 }
 
 // 按键回调运行在 button 组件的任务里,操作 LVGL 必须加锁。
@@ -79,25 +94,38 @@ static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
     (void)user;
     if (!bsp_lvgl_lock(500)) return;
 
+    // 电源键长按:任何页面都关机。木鱼页除外——它的开机防误触 guard 在
+    // demo_woodfish_key 里,事件必须先进页面才能被 guard 拦下。
+    if (btn == BSP_BTN_UP && ev == BSP_BTN_LONG && s_active != MUYU_DEMO_INDEX) {
+        demo_woodfish_power_off();         // 不返回(持锁进入深睡,断电前无需解锁)
+    }
+
     if (s_active >= 0) {
-        if (btn == BSP_BTN_OK && ev == BSP_BTN_LONG) {     // 统一返回
-            DEMOS[s_active].exit();
+        if (btn == BSP_BTN_UP && ev == BSP_BTN_CLICK &&
+            !(s_active == MUYU_DEMO_INDEX && demo_woodfish_screen_off())) {
+            DEMOS[s_active].exit();        // 保存退出,返回上一级
             enter_menu();
         } else {
+            // 木鱼页息屏时短按电源键只亮屏:screen_wake 在页面 key 里做,
+            // 且页面不再处理 UP 单击,自然不会退出
             DEMOS[s_active].key(btn, ev);
         }
     } else if (ev == BSP_BTN_CLICK) {
-        if (btn == BSP_BTN_UP)   { s_sel = (s_sel + DEMO_COUNT - 1) % DEMO_COUNT; menu_refresh(); }
-        if (btn == BSP_BTN_DOWN) { s_sel = (s_sel + 1) % DEMO_COUNT;              menu_refresh(); }
-        if (btn == BSP_BTN_OK && s_ok[s_sel]) {
+        bool was_dark = s_menu_dark;
+        if (was_dark) menu_wake();         // 息屏时任意按键:亮屏
+        if (btn == BSP_BTN_UP) {
+            if (!was_dark) menu_sleep();   // 亮屏时短按电源键:息屏(唤醒那一下不回关)
+        } else if (btn == BSP_BTN_DOWN) {
+            s_sel = (s_sel + 1) % DEMO_COUNT;
+            menu_refresh();
+            ui_pixel_mascot_jump(s_mascot);
+        } else if (btn == BSP_BTN_OK && s_ok[s_sel]) {
             s_active = s_sel;
             ui_pixel_mascot_jump(s_mascot);
             lv_obj_delete(s_menu_scr);
             s_menu_scr = NULL;
             s_mascot = NULL;
             DEMOS[s_active].enter();
-        } else if (btn == BSP_BTN_UP || btn == BSP_BTN_DOWN) {
-            ui_pixel_mascot_jump(s_mascot);
         }
     }
     bsp_lvgl_unlock();
