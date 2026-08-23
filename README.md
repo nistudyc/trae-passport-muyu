@@ -19,11 +19,22 @@ A knock-the-woodfish merit counter (敲木鱼积功德) for the [FoloToy AI Pass
 | Key | Action | Function |
 | --- | --- | --- |
 | `OK` | press | Knock: merit +1, sound, animation, floating "+1" |
-| `OK` | long | Mute / unmute |
-| `UP` | short | Save & exit, back to the menu (in menu: screen off/on toggle) |
-| `UP` | long 1.5 s | Power off from any page (deep sleep; press `UP` to wake) |
-| `DOWN` | short | Cycle tone CLASSIC / BELL / BLOCK / DROP |
+| `OK` | long | Save & exit, back to the menu (in menu: enter selection) |
+| `UP` | short | Mute / unmute (in menu: move selection up) |
+| `DOWN` | short | Cycle tone CLASSIC / BELL / BLOCK / DROP (in menu: move selection down) |
 | `DOWN` | long | Auto-knock every 0.7 s |
+| `PWR` | — | Hardware switch: cuts power directly, invisible to firmware |
+
+> **The power key on this device is a hardware switch** — it cuts power
+> directly and is invisible to the firmware; power on/off is done by it, the
+> woodfish screen sleeps after 2 min idle and any key wakes it. The firmware
+> keeps a software interface for an independent power key (`BSP_PWR_BTN_GPIO`
+> in `bsp_pins.h`): set a pin and short-press toggles the screen, long-press
+> (1.5 s) powers off from any page (deep sleep, `UP` wakes). Note every GPIO
+> on this board is already in use and GPIO11–17 are the onboard flash pins
+> (touching them crashes the chip), so keep `-1`. On a custom board with the
+> power key on the button resistor ladder, open the Button page, hold the key
+> and watch the ADC voltage, then extend `BSP_BTN_MV_TABLE` to 4 bands.
 
 ## Web flashing
 
